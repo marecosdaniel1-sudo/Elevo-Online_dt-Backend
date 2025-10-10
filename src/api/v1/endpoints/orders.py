@@ -262,13 +262,29 @@ async def get_my_orders(
         
         with open("my_orders_debug.log", "a", encoding="utf-8") as f:
             f.write(f"Orders found: {len(orders)}\n")
-            # Force loading of relationships before session closes
-            for order in orders:
-                _ = order.customer_name  # Access property to trigger loading
-                _ = order.customer_email
-            f.write(f"Relationships loaded, about to return...\n")
         
-        return orders
+        # Populate customer_name manually
+        order_list = []
+        for order in orders:
+            order_dict = {
+                "id": order.id,
+                "order_number": order.order_number,
+                "customer_id": order.customer_id,
+                "customer_name": order.customer.user.full_name if order.customer and order.customer.user else None,
+                "status": order.status,
+                "start_date": order.start_date,
+                "end_date": order.end_date,
+                "total_amount": order.total_amount,
+                "is_paid": order.is_paid,
+                "is_overdue": order.is_overdue,
+                "created_at": order.created_at
+            }
+            order_list.append(OrderListItem(**order_dict))
+        
+        with open("my_orders_debug.log", "a", encoding="utf-8") as f:
+            f.write(f"Returning {len(order_list)} orders\n")
+        
+        return order_list
     except HTTPException:
         raise
     except Exception as e:
@@ -316,7 +332,25 @@ async def list_orders(
     result = await db.execute(query)
     orders = result.scalars().all()
     
-    return orders
+    # Populate customer_name manually
+    order_list = []
+    for order in orders:
+        order_dict = {
+            "id": order.id,
+            "order_number": order.order_number,
+            "customer_id": order.customer_id,
+            "customer_name": order.customer.user.full_name if order.customer and order.customer.user else None,
+            "status": order.status,
+            "start_date": order.start_date,
+            "end_date": order.end_date,
+            "total_amount": order.total_amount,
+            "is_paid": order.is_paid,
+            "is_overdue": order.is_overdue,
+            "created_at": order.created_at
+        }
+        order_list.append(OrderListItem(**order_dict))
+    
+    return order_list
 
 
 @router.get("/{order_id}", response_model=OrderWithItems)
@@ -366,7 +400,13 @@ async def get_order(
             detail="No tiene permisos para ver este pedido"
         )
     
-    return order
+    # Construir response con customer info
+    order_dict = OrderWithItems.model_validate(order).model_dump()
+    if order.customer and order.customer.user:
+        order_dict["customer_name"] = order.customer.user.full_name
+        order_dict["customer_email"] = order.customer.user.email
+    
+    return OrderWithItems(**order_dict)
 
 
 @router.patch("/{order_id}", response_model=OrderResponse)

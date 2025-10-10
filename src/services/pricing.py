@@ -94,7 +94,7 @@ class PricingService:
         }
     
     @staticmethod
-    def calculate_delivery_fee(postal_code: str) -> float:
+    def calculate_delivery_fee(postal_code: str = None) -> float:
         """
         Calcula el costo de envío basado en código postal
         
@@ -102,6 +102,8 @@ class PricingService:
         """
         # Por ahora, tarifa fija
         # En el futuro, se puede integrar con API de geolocalización
+        if postal_code is None:
+            return settings.DELIVERY_FEE
         return settings.DELIVERY_FEE
     
     @staticmethod
@@ -136,7 +138,7 @@ class PricingService:
         start_date: datetime,
         end_date: datetime,
         rental_period: RentalPeriod,
-        postal_code: str
+        postal_code: str = None
     ) -> Dict:
         """
         Calcula el precio total de un pedido

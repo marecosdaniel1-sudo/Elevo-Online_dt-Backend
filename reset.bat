@@ -29,9 +29,21 @@ venv\Scripts\python.exe scripts\reset_db.py
 
 if %ERRORLEVEL% EQU 0 (
     echo.
-    echo ============================================
-    echo   Reset completado exitosamente
-    echo ============================================
+    echo Reset completado. Poblando con datos de prueba...
+    echo.
+    venv\Scripts\python.exe scripts\seed_data.py
+    
+    if %ERRORLEVEL% EQU 0 (
+        echo.
+        echo ============================================
+        echo   Base de datos lista para usar
+        echo ============================================
+    ) else (
+        echo.
+        echo ============================================
+        echo   Error al poblar datos
+        echo ============================================
+    )
 ) else (
     echo.
     echo ============================================

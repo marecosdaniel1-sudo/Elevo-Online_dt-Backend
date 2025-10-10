@@ -136,7 +136,7 @@ class OrderPriceCalculation(BaseModel):
     start_date: datetime
     end_date: datetime
     rental_period: RentalPeriod
-    delivery_postal_code: str
+    delivery_postal_code: Optional[str] = None
 
 
 class OrderPriceResponse(BaseModel):
