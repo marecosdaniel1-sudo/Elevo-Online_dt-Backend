@@ -38,6 +38,45 @@ def generate_order_number() -> str:
     return f"ORD-{timestamp}-{random_chars}"
 
 
+async def update_order_status_by_date(order: Order, db: AsyncSession) -> bool:
+    """
+    Actualiza el estado de una orden basándose en las fechas
+    - Si está CONFIRMED y llegó start_date → IN_USE
+    - Si está IN_USE y llegó end_date → COMPLETED
+    
+    Returns True si se actualizó el estado
+    """
+    try:
+        # Obtener fecha actual (naive para comparar con dates)
+        now = datetime.now().date()
+        updated = False
+        
+        # Manejar caso donde start_date o end_date pueden ser None
+        if not order.start_date or not order.end_date:
+            return False
+        
+        # Convertir start_date y end_date a date si son datetime
+        start_date = order.start_date.date() if hasattr(order.start_date, 'date') else order.start_date
+        end_date = order.end_date.date() if hasattr(order.end_date, 'date') else order.end_date
+        
+        # Si está confirmado y llegó la fecha de inicio, cambiar a IN_USE
+        if order.status == OrderStatus.CONFIRMED and start_date <= now:
+            order.status = OrderStatus.IN_USE
+            order.delivered_at = datetime.utcnow()
+            updated = True
+        
+        # Si está en uso y llegó la fecha de fin, cambiar a COMPLETED
+        elif order.status == OrderStatus.IN_USE and end_date <= now:
+            order.status = OrderStatus.COMPLETED
+            order.completed_at = datetime.utcnow()
+            updated = True
+        
+        return updated
+    except Exception as e:
+        # Log error pero no romper el flujo
+        print(f"Error updating order status: {e}")
+        return False
+
 @router.post("/calculate-price", response_model=OrderPriceResponse)
 async def calculate_price(
     calculation: OrderPriceCalculation,
@@ -260,6 +299,19 @@ async def get_my_orders(
         result = await db.execute(query)
         orders = result.scalars().all()
         
+        # ✅ Actualizar estados automáticamente basándose en fechas
+        needs_commit = False
+        for order in orders:
+            if await update_order_status_by_date(order, db):
+                needs_commit = True
+        
+        # Hacer un solo commit si hubo cambios
+        if needs_commit:
+            await db.commit()
+            # Refrescar todas las órdenes actualizadas
+            for order in orders:
+                await db.refresh(order)
+        
         with open("my_orders_debug.log", "a", encoding="utf-8") as f:
             f.write(f"Orders found: {len(orders)}\n")
         
@@ -331,6 +383,19 @@ async def list_orders(
     
     result = await db.execute(query)
     orders = result.scalars().all()
+    
+    # ✅ Actualizar estados automáticamente basándose en fechas
+    needs_commit = False
+    for order in orders:
+        if await update_order_status_by_date(order, db):
+            needs_commit = True
+    
+    # Hacer un solo commit si hubo cambios
+    if needs_commit:
+        await db.commit()
+        # Refrescar todas las órdenes actualizadas
+        for order in orders:
+            await db.refresh(order)
     
     # Populate customer_name manually
     order_list = []
@@ -405,6 +470,39 @@ async def get_order(
     if order.customer and order.customer.user:
         order_dict["customer_name"] = order.customer.user.full_name
         order_dict["customer_email"] = order.customer.user.email
+    
+    # Si los valores de pricing están en 0, recalcular (para órdenes antiguas)
+    if order.subtotal == 0 or order.total_amount == 0:
+        # Obtener scaffolds para los items
+        items_with_scaffolds = []
+        for item in order.order_items:
+            result = await db.execute(
+                select(Scaffold).where(Scaffold.id == item.scaffold_id)
+            )
+            scaffold = result.scalar_one_or_none()
+            if scaffold:
+                items_with_scaffolds.append({
+                    'scaffold': scaffold,
+                    'quantity': item.quantity
+                })
+        
+        # Recalcular precios
+        if items_with_scaffolds:
+            price_data = PricingService.calculate_order_price(
+                items_with_scaffolds,
+                order.start_date,
+                order.end_date,
+                order.rental_period,
+                order.delivery_postal_code
+            )
+            
+            # Actualizar en el dict de respuesta
+            order_dict["subtotal"] = price_data['subtotal']
+            order_dict["delivery_fee"] = price_data['delivery_fee']
+            order_dict["tax_amount"] = price_data['tax_amount']
+            order_dict["discount_amount"] = price_data['discount_amount']
+            order_dict["deposit_amount"] = price_data['deposit_amount']
+            order_dict["total_amount"] = price_data['total_amount']
     
     return OrderWithItems(**order_dict)
 

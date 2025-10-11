@@ -12,8 +12,8 @@ import string
 
 from src.core.database import get_db
 from src.core.security import get_current_user_email
-from src.models.transaction import Transaction
-from src.models.order import Order
+from src.models.transaction import Transaction, TransactionType
+from src.models.order import Order, OrderStatus
 from src.models.user import User
 from src.models.customer import Customer
 from src.schemas.transaction import (
@@ -136,8 +136,20 @@ async def create_transaction(
         
         db.add(new_transaction)
         
+        # ✅ NUEVO: Actualizar estado de la orden cuando se registra un pago
+        if transaction_data.type == TransactionType.PAYMENT:
+            # Marcar orden como pagada
+            order.is_paid = True
+            
+            # Cambiar estado de PENDING a CONFIRMED si es un pago
+            if order.status == OrderStatus.PENDING:
+                order.status = OrderStatus.CONFIRMED
+                order.confirmed_at = datetime.utcnow()
+        
         with open("transaction_debug.log", "a", encoding="utf-8") as f:
             f.write(f"Transaction added, committing...\n")
+            if transaction_data.type == TransactionType.PAYMENT:
+                f.write(f"Order updated: is_paid={order.is_paid}, status={order.status}\n")
         
         await db.commit()
         await db.refresh(new_transaction)
